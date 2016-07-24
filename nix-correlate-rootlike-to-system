@@ -1,0 +1,12 @@
+#!/bin/sh
+
+storepath="$1"
+
+{ # Intersect two sets:
+
+	# 1. all referrers of a store path
+	nix-store --query --referrers-closure "${storepath}"
+
+	# 2. all store paths directly required by the system profile
+	nix-store --query --references /nix/var/nix/profiles/system
+} | sort | uniq --repeated

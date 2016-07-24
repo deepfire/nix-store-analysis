@@ -1,0 +1,17 @@
+#!/bin/sh
+
+name="$1"
+
+echo    "; analyzing \"/nix/store/*-${name}-*\" (minus noise)"
+echo -e "referrers\t| disc\t| correlation to profile"
+echo -e "closure\tdirect  | size\t| user\tsystem"
+
+for x in $(ls -d /nix/store/*-${name}-* | grep -v "\.tar\.\|\.lock\|\.drv\|patch\|diff\|debug\|locales\|bootstrap\|-wrapper\|-info\|-static\|-doc\|-paths\|-bin\|-dev\|-lib\|-man")
+do
+	echo -ne "$(nix-store --query --referrers-closure     $x | wc -l)\t"
+	echo -ne "$(nix-store --query --referrers             $x | wc -l)\t| "
+	echo -ne "$(du --max-depth=0 --human-readable $x | cut -f1)\t| "
+	echo -ne "$(nix-correlate-rootlike-to-current-userenv $x | wc -l)\t"
+	echo -ne "$(nix-correlate-rootlike-to-system          $x | wc -l)\t"
+	echo     "$x"
+done | sort -nr
