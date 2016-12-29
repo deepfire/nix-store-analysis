@@ -1,0 +1,116 @@
+#!/bin/sh
+
+set -ue
+
+usage() {
+     cat <<EOF >&2
+Usage: $(basename $0) [OPTIONS] <nix-store-object> [OP [ARGS..]] [OP [ARGS..]] ...
+
+   Analyze a store object's dependency graph.
+
+Options:
+
+   --verbose     Explain output
+
+Operations:
+
+   dups          Show duplicate dependencies, with same name and version
+                   This is the default operation.
+   deps NAME VER
+                 Print all store derivations depending on package NAME-VER,
+                   grouping output by particular derivation.
+
+EOF
+}
+
+test $# -ge 1 || {
+	usage
+	exit 1
+}
+
+store_object="$1"; shift
+
+verbose=
+if test $1 = "--verbose"
+then verbose=yes
+fi
+trace() {
+	if test -n "${verbose}"
+	then echo "$*"
+	fi
+}
+
+###
+depgraph=$(mktemp nix-analyze-deps.depgraph.XXXXX)
+drvs=$(mktemp nix-analyze-deps.drvs.XXXXX)
+kdrvs=$(mktemp nix-analyze-deps.kdrvs.XXXXX)
+dups=$(mktemp nix-analyze-deps.dups.XXXXX)
+
+atexit() {
+	 rm -f ${depgraph} ${drvs} ${kdrvs} ${dups}
+}
+trap atexit EXIT
+
+## 0. analyze the file
+test -f ${store_object} || {
+     trace "ERROR: store object '${store_object}' doesn't exist" >&2
+}
+nix-store --query --graph ${store_object} | grep -v '^\(digraph G {\|}\)$' > ${depgraph}
+
+## 1. enumerate package derivations
+cut -d\" -f2  ${depgraph} |
+  grep -v '\.\(gz\|bz2\|xz\|zip\|patch\|cabal\)\.drv$' |    # drop non-package stuff
+  sort | uniq > ${drvs}
+
+## 2. key derivations by name and version
+sed 's/^\([^-]*-\([^0-9-][0-9a-zA-Z\._]*\(-[^0-9-][0-9a-zA-Z\._]*\)*\)-\([0-9].*\)\.drv\)$/\2 \4 \1/' ${drvs} |
+  grep ' ' |                                                # drop unversioned things
+  sort > ${kdrvs}
+
+# cut -d-  -f2- ${drvs} | sed 's/^\([^0-9-][0-9a-zA-Z\._]*\(-[^0-9-][0-9a-zA-Z\._]*\)*\)-[0-9].*$/\1/' | sort > ${pkgs}
+
+## 3. find duplicates:  packages with same name and version
+cut -d' ' -f1,2 ${kdrvs} | uniq -d > ${dups}
+
+path_deps() {
+	grep "$1\" ->" ${depgraph} | cut -d\" -f4
+}
+
+op_dups() {
+	cat ${dups}
+}
+
+op_deps() {
+	pkg="$1"; shift
+	ver="$1"; shift
+	trace ";   ..dependencies of ${pkg} ${ver}"
+	ag --nonumbers "${pkg} ${ver} " ${kdrvs} | {
+		read pkg ver path || true
+		while test ! -z "${pkg}"
+		do
+			trace ";     ..deps of ${path}.."
+			ag --nonumbers "${pkg} ${ver} ${path}" ${kdrvs}
+			path_deps ${path}
+			read pkg ver path || true
+		done
+	}
+}
+
+process_single_op() {
+	op=$1; shift
+	case ${op} in
+		dups ) op_dups;;
+		deps ) op_deps "$1" "$2"; shift 2;;
+		* )    usage; exit 1;;
+	esac
+	if test $# -ge 1
+	then process_single_op "$@"
+	fi
+}
+
+trace "; store object ${store_object}"
+
+if test $# -eq 0
+then process_single_op "dups"
+else process_single_op "$@"
+fi
