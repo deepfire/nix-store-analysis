@@ -2,6 +2,8 @@
 
 name="$1"
 
+deppath=$(dirname $0)
+
 echo    "; analyzing \"/nix/store/*-${name}-*\" (minus noise)"
 echo -e "referrers\t| disc\t| correlation to profile"
 echo -e "closure\tdirect  | size\t| user\tsystem"
@@ -11,7 +13,7 @@ do
 	echo -ne "$(nix-store --query --referrers-closure     $x | wc -l)\t"
 	echo -ne "$(nix-store --query --referrers             $x | wc -l)\t| "
 	echo -ne "$(du --max-depth=0 --human-readable $x | cut -f1)\t| "
-	echo -ne "$(nix-correlate-rootlike-to-current-userenv $x | wc -l)\t"
-	echo -ne "$(nix-correlate-rootlike-to-system          $x | wc -l)\t"
+	echo -ne "$(${deppath}/nix-correlate-rootlike-to-current-userenv $x | wc -l)\t"
+	echo -ne "$(${deppath}/nix-correlate-rootlike-to-system          $x | wc -l)\t"
 	echo     "$x"
 done | sort -nr
